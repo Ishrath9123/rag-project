@@ -1,6 +1,9 @@
 # Virtual environments  
 venv/  
-.env/  
+
+# Secrets
+.env
+.env/
 
 # Python cache  
 __pycache__/  
