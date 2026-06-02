@@ -20,20 +20,30 @@ else:
     print("API Key missing from .env file")
 
 
-def test_gemini(prompt: str = "Hello! Please respond in one short sentence.") -> dict:
+def test_gemini(prompt: str = "Explain how photosynthesis works in simple terms.") -> dict:
     """
-    Verify the Gemini API integration by sending a test prompt and returning the response.
+    Run a two-step Gemini flow: outline first, then expand into a full answer.
 
-    Steps:
-    1. Confirm the API key was loaded and the client was created at startup.
-    2. Send the prompt to the configured Gemini model.
-    3. Return the model name, prompt, and generated answer as a dictionary.
+    Step 1 — Generate a short outline for the user's question.
+    Step 2 — Use that outline to produce the final response returned to the client.
     """
     if not client:
         raise ValueError("GEMINI_API_KEY not configured")
 
-    response = client.models.generate_content(model=MODEL, contents=prompt)
-    return {"model": MODEL, "prompt": prompt, "answer": response.text}
+    outline_prompt = (
+        f"Generate a short bullet-point outline (3-5 points) for answering: {prompt}"
+    )
+    outline_response = client.models.generate_content(model=MODEL, contents=outline_prompt)
+    outline = outline_response.text
+    print(f"[Step 1 outline]\n{outline}")
+
+    expand_prompt = (
+        f"Using this outline:\n{outline}\n\n"
+        f"Write a clear, complete answer to: {prompt}"
+    )
+    final_response = client.models.generate_content(model=MODEL, contents=expand_prompt)
+
+    return {"model": MODEL, "prompt": prompt, "answer": final_response.text}
 
 
 @app.get("/health")

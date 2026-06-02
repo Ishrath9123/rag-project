@@ -1,8 +1,8 @@
-# Week 5 — Gemini API Integration
+# Week 6 — Multi-Step Execution
 
 ## Project Overview
 
-This repository extends the Week 4 RAG backend with a working **Google Gemini API** integration. The goal of this lab was to securely load an API key from the environment, connect to Gemini, send a test prompt, and verify that the model returns a generated response through our FastAPI server.
+This repository extends the Week 5 Gemini integration with **multi-step execution**. Instead of a single prompt-and-response call, the backend runs two sequential Gemini steps server-side: first an outline, then a full answer built from that outline. The final response depends on the earlier step's output.
 
 ---
 
@@ -22,38 +22,64 @@ This repository extends the Week 4 RAG backend with a working **Google Gemini AP
 
 1. **`load_dotenv()`** reads secrets from `.env` when the server starts.
 2. **`genai.Client(api_key=...)`** authenticates with Google's Gemini API.
-3. **`test_gemini()`** sends a default test prompt to the model and returns the answer.
+3. **`test_gemini()`** runs a two-step flow: outline generation, then expansion into a final answer.
 4. **`/test-gemini`** exposes that function as an HTTP endpoint for easy browser testing.
-5. **`/chat/`** reuses the same logic but accepts a custom prompt from the user.
+5. **`/chat/`** reuses the same multi-step logic but accepts a custom prompt from the user.
+
+---
+
+## Multi-Step Flow
+
+The Gemini logic lives in `test_gemini()`. Both `/test-gemini` and `/chat/` call this function, so the multi-step behavior is shared.
+
+| Step | Responsibility | Input | Output |
+|------|----------------|-------|--------|
+| **1 — Outline** | Break the question into 3–5 bullet points | User's question | Short outline (logged to the server terminal, not returned to the client) |
+| **2 — Expand** | Write a complete answer guided by the outline | User's question + Step 1 outline | Final answer returned in the API response |
+
+### Why the steps are separated
+
+- **Step 1** forces the model to plan before writing, which tends to produce more structured answers.
+- **Step 2** expands that plan into prose, so the final output clearly depends on the earlier AI call.
+- Keeping both steps server-side gives us control over the sequence without changing the Week 5 API shape.
+
+This pattern is a foundation for later work (RAG, validation, guardrails) where multiple logical steps run in order.
 
 ---
 
 ## `test_gemini()` — Logic Explanation
 
-The `test_gemini()` function is the core verification step for this lab. It proves that our backend can talk to Gemini end-to-end.
-
 ```python
-def test_gemini(prompt: str = "Hello! Please respond in one short sentence.") -> dict:
+def test_gemini(prompt: str = "Explain how photosynthesis works in simple terms.") -> dict:
     if not client:
         raise ValueError("GEMINI_API_KEY not configured")
 
-    response = client.models.generate_content(model=MODEL, contents=prompt)
-    return {"model": MODEL, "prompt": prompt, "answer": response.text}
+    outline_prompt = (
+        f"Generate a short bullet-point outline (3-5 points) for answering: {prompt}"
+    )
+    outline_response = client.models.generate_content(model=MODEL, contents=outline_prompt)
+    outline = outline_response.text
+
+    expand_prompt = (
+        f"Using this outline:\n{outline}\n\n"
+        f"Write a clear, complete answer to: {prompt}"
+    )
+    final_response = client.models.generate_content(model=MODEL, contents=expand_prompt)
+
+    return {"model": MODEL, "prompt": prompt, "answer": final_response.text}
 ```
 
 ### Step-by-step logic
 
-1. **Environment setup (at startup)** — Before `test_gemini()` runs, `load_dotenv()` loads `GEMINI_API_KEY` from `.env`, and `genai.Client()` is created. This keeps secrets out of source code.
+1. **Environment setup (at startup)** — Before `test_gemini()` runs, `load_dotenv()` loads `GEMINI_API_KEY` from `.env`, and `genai.Client()` is created.
 
-2. **Guard check** — `if not client` verifies the API key exists. If missing, we raise an error immediately instead of calling Google with invalid credentials.
+2. **Guard check** — `if not client` verifies the API key exists before any Gemini calls.
 
-3. **Model selection** — `MODEL` defaults to `gemini-2.5-flash` (override with `GEMINI_MODEL` in `.env`). This tells Gemini which model generates the text.
+3. **Step 1 — Outline** — Send a prompt asking Gemini for a short bullet-point outline for the user's question. Store the result in `outline` and log it to the terminal for inspection.
 
-4. **API call** — `client.models.generate_content(model=MODEL, contents=prompt)` sends the prompt to Google and waits for a response.
+4. **Step 2 — Expand** — Build a second prompt that includes the outline from Step 1 and ask Gemini to write the full answer. Only this final text is returned to the client.
 
-5. **Return result** — We return a dictionary with the model name, the prompt we sent, and `response.text` (Gemini's answer). This confirms the full request–response cycle works.
-
-6. **Error handling (in endpoints)** — `/test-gemini` and `/chat/` catch API errors (e.g. rate limits) and return clear HTTP status codes instead of crashing the server.
+5. **Error handling (in endpoints)** — `/test-gemini` and `/chat/` catch API errors and return clear HTTP status codes instead of exposing secrets or crashing the server.
 
 ---
 
@@ -85,23 +111,23 @@ python -m uvicorn rag_app:app --reload
 | Test | URL | Expected result |
 |------|-----|-----------------|
 | Server health | http://127.0.0.1:8000/health | `{"status":"ok","message":"RAG App is running!"}` |
-| Gemini integration | http://127.0.0.1:8000/test-gemini | JSON with `status`, `model`, `prompt`, and `answer` |
-| Custom prompt | http://127.0.0.1:8000/chat/?prompt=Hello | JSON with your question and Gemini's answer |
+| Gemini integration | http://127.0.0.1:8000/test-gemini | JSON with `status`, `model`, `prompt`, and final `answer` (two Gemini calls; outline logged in terminal) |
+| Custom prompt | http://127.0.0.1:8000/chat/?prompt=What+is+gravity | JSON with your question and the expanded answer |
 
 On startup, the terminal should print: `Gemini API successfully connected!`
 
 ---
 
-## Learning Outcomes (Week 5)
+## Learning Outcomes (Week 6)
 
-- Loaded API credentials securely using environment variables and `.gitignore`
-- Initialized the Google Gemini client with the `google-genai` SDK
-- Implemented `test_gemini()` to verify generative AI connectivity
-- Exposed the integration through FastAPI endpoints for testing
+- Understood multi-step execution: later AI steps depend on earlier outputs
+- Implemented a two-step outline-then-expand flow inside `test_gemini()`
+- Kept API structure unchanged from Week 5 while moving control flow server-side
+- Logged intermediate results for debugging without exposing them in the HTTP response
 - Handled API errors with appropriate HTTP responses
 
 ---
 
 ## Reflections
 
-The main challenge was managing API rate limits on the free tier — switching from `gemini-2.0-flash` to `gemini-2.5-flash` resolved quota errors. Using a project virtual environment (`venv/`) also fixed editor import warnings. Next steps for the RAG pipeline will include document ingestion and vector search before sending context to Gemini.
+The main challenge was keeping the flow simple while making the dependency between steps obvious — passing the Step 1 outline directly into the Step 2 prompt makes that link clear. Rate limits on the free tier mean each request now uses two API calls instead of one, so testing incrementally (confirm Step 1 logs an outline before relying on Step 2) helped catch issues early. Next steps for the RAG pipeline will add retrieval before the multi-step generation flow.
