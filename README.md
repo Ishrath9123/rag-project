@@ -1,8 +1,34 @@
-# Week 6 — Multi-Step Execution
+# Week 7 — Validating User Input and AI Output
 
 ## Project Overview
 
-This repository extends the Week 5 Gemini integration with **multi-step execution**. Instead of a single prompt-and-response call, the backend runs two sequential Gemini steps server-side: first an outline, then a full answer built from that outline. The final response depends on the earlier step's output.
+This repository extends the Week 6 multi-step backend with **basic safety checks** at two important points: before user input is sent to the AI model, and before the AI's response is returned to the user. It also adds a **second AI model call** whose job is to review and improve the output of the first model.
+
+---
+
+## Week 7 — Validation and Review
+
+### New endpoint: `POST /query`
+
+The new endpoint accepts a JSON body with a `question` field (defined by the `QueryRequest` Pydantic model) and runs this pipeline:
+
+1. **User input is validated** — `validate_user_input()` rejects empty, too-short (< 5 chars), or too-long (> 500 chars) questions with a clear `400` error. The AI model is never called when input validation fails.
+2. **The first AI model generates an answer** from the user's question.
+3. **The raw answer is validated** — `validate_model_output()` rejects empty or suspiciously short responses with a `500` error.
+4. **A second AI model reviews the answer** — `review_model_output()` asks Gemini to improve the response if it is unclear or incomplete, and return it unchanged if it is already good.
+5. **The final (reviewed) answer is returned** to the user.
+
+### Why input validation exists
+
+Users can send empty, broken, or malicious input. Rejecting bad input early returns a clear error message immediately, avoids wasting API calls (and quota) on garbage requests, and protects the model from inputs it can't answer meaningfully.
+
+### Why output validation exists
+
+AI models can hallucinate or return empty, incomplete, or confusing answers. Checking the raw response before returning it ensures we never send obviously bad output to users — a controlled `500` error is better than a blank answer.
+
+### Why a second AI model reviews responses
+
+Instead of trusting the first model's answer blindly, a second model call acts as a quality gate: it checks and improves the answer before the user sees it. This "one model checks another" pattern is commonly used in production GenAI systems to make outputs more reliable.
 
 ---
 
@@ -10,7 +36,7 @@ This repository extends the Week 5 Gemini integration with **multi-step executio
 
 | File | Purpose |
 |------|---------|
-| **`rag_app.py`** | FastAPI backend with `/health`, `/test-gemini`, and `/chat/` endpoints |
+| **`rag_app.py`** | FastAPI backend with `/health`, `/test-gemini`, `/chat/`, and `/query` endpoints |
 | **`.env`** | Stores `GEMINI_API_KEY` locally (never committed to GitHub) |
 | **`.gitignore`** | Prevents Git from tracking `.env`, `venv/`, and cache files |
 | **`requirements.txt`** | Python dependencies: `fastapi`, `uvicorn`, `python-dotenv`, `google-genai` |
@@ -25,6 +51,7 @@ This repository extends the Week 5 Gemini integration with **multi-step executio
 3. **`test_gemini()`** runs a two-step flow: outline generation, then expansion into a final answer.
 4. **`/test-gemini`** exposes that function as an HTTP endpoint for easy browser testing.
 5. **`/chat/`** reuses the same multi-step logic but accepts a custom prompt from the user.
+6. **`/query`** (Week 7) validates input, generates an answer, validates the output, and has a second model review it before returning.
 
 ---
 
@@ -113,21 +140,25 @@ python -m uvicorn rag_app:app --reload
 | Server health | http://127.0.0.1:8000/health | `{"status":"ok","message":"RAG App is running!"}` |
 | Gemini integration | http://127.0.0.1:8000/test-gemini | JSON with `status`, `model`, `prompt`, and final `answer` (two Gemini calls; outline logged in terminal) |
 | Custom prompt | http://127.0.0.1:8000/chat/?prompt=What+is+gravity | JSON with your question and the expanded answer |
+| Validated query (Week 7) | `POST` http://127.0.0.1:8000/query with `{"question": "What is retrieval augmented generation?"}` | JSON with `question` and the reviewed `answer` |
+| Invalid input (Week 7) | `POST /query` with `{"question": ""}` or `{"question": "hi"}` | `400` with `"Question cannot be empty"` / `"Question is too short"` — no AI call is made |
+
+The easiest way to test `POST /query` is the automatic docs page: open http://127.0.0.1:8000/docs, expand **POST /query**, click **Try it out**, enter a request body, and click **Execute**.
 
 On startup, the terminal should print: `Gemini API successfully connected!`
 
 ---
 
-## Learning Outcomes (Week 6)
+## Learning Outcomes (Week 7)
 
-- Understood multi-step execution: later AI steps depend on earlier outputs
-- Implemented a two-step outline-then-expand flow inside `test_gemini()`
-- Kept API structure unchanged from Week 5 while moving control flow server-side
-- Logged intermediate results for debugging without exposing them in the HTTP response
-- Handled API errors with appropriate HTTP responses
+- Defined request shapes with Pydantic (`QueryRequest`) so FastAPI validates the JSON body automatically
+- Rejected bad user input early with clear `400` errors, before any AI call is made
+- Validated AI output before returning it, so users never see empty or broken responses
+- Used a second AI model call to review and improve the first model's answer
+- Returned controlled, readable error messages for every failure case
 
 ---
 
 ## Reflections
 
-The main challenge was keeping the flow simple while making the dependency between steps obvious — passing the Step 1 outline directly into the Step 2 prompt makes that link clear. Rate limits on the free tier mean each request now uses two API calls instead of one, so testing incrementally (confirm Step 1 logs an outline before relying on Step 2) helped catch issues early. Next steps for the RAG pipeline will add retrieval before the multi-step generation flow.
+The main challenge this week was making the review step return only the improved answer — the reviewer initially replied with commentary like "this response is already good" instead of the answer itself, which was fixed by tightening the review prompt. Free-tier rate limits are also more noticeable now that a single `/query` request makes two model calls; transient `503 high demand` errors from Gemini resolve on retry. Next steps will add retrieval (RAG) in front of this validated pipeline.
