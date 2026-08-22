@@ -106,4 +106,13 @@ The app opens in your browser at `http://localhost:8501`.
 - [x] Week 13 — Implemented hallucination monitoring
 - [x] Week 14 — Implemented filtering and fallbacks
 - [x] Week 15 — Implemented multi-step AI workflows
+- [x] Week 16 — Architecture diagram
+
+---
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level system diagram and component explanations.
+
+![Architecture Diagram](docs/rag-app-architecture-diagram.png)
 
