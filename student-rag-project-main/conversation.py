@@ -26,9 +26,12 @@ class ConversationHistory:
     def __init__(self):
         self.messages = []
 
-    def add_message(self, role, content):
+    def add_message(self, role, content, metadata=None):
         """Add a message to the history. role is "user" or "assistant"."""
-        self.messages.append({"role": role, "content": content})
+        message = {"role": role, "content": content}
+        if metadata:
+            message["metadata"] = metadata
+        self.messages.append(message)
 
     def get_formatted_history(self):
         """

@@ -33,7 +33,7 @@ def get_or_create_collection():
     return _client.get_or_create_collection(name=COLLECTION_NAME)
 
 
-def add_documents(documents, embeddings, ids):
+def add_documents(documents, embeddings, ids, metadatas=None):
     """
     Add documents and their embeddings to the vector database.
 
@@ -41,13 +41,17 @@ def add_documents(documents, embeddings, ids):
         documents:  A list of the original text strings.
         embeddings: A list of embedding vectors (one per document).
         ids:        A list of unique ID strings (one per document).
+        metadatas:  Optional list of metadata dicts (Week 18 compliance tags).
     """
     collection = get_or_create_collection()
-    collection.add(
-        documents=documents,
-        embeddings=embeddings,
-        ids=ids,
-    )
+    kwargs = {
+        "documents": documents,
+        "embeddings": embeddings,
+        "ids": ids,
+    }
+    if metadatas:
+        kwargs["metadatas"] = metadatas
+    collection.add(**kwargs)
 
 
 def query_similar(query_embedding, n_results):

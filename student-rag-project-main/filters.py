@@ -18,6 +18,32 @@
 
 from config import SIMILARITY_THRESHOLD
 
+RETRYABLE_STATUS_CODES = {429, 500, 503, 504}
+
+
+def is_retryable_api_error(error):
+    """Return True for temporary Gemini/API failures worth retrying."""
+    code = getattr(error, "code", None)
+    if code in RETRYABLE_STATUS_CODES:
+        return True
+
+    error_str = str(error).lower()
+    return any(
+        phrase in error_str
+        for phrase in (
+            "503",
+            "429",
+            "500",
+            "504",
+            "rate limit",
+            "quota",
+            "resource_exhausted",
+            "service unavailable",
+            "overloaded",
+            "unavailable",
+        )
+    )
+
 
 def filter_by_threshold(documents, distances, threshold=SIMILARITY_THRESHOLD):
     """
@@ -99,11 +125,12 @@ def handle_api_error(error):
         A plain-English string describing what went wrong.
     """
     error_str = str(error).lower()
+    code = getattr(error, "code", None)
 
-    if "rate limit" in error_str or "quota" in error_str or "resource_exhausted" in error_str:
+    if code in RETRYABLE_STATUS_CODES or is_retryable_api_error(error):
         return (
-            "The AI service is temporarily unavailable due to rate limits. "
-            "Please wait a moment and try again."
+            "The AI service is temporarily unavailable due to rate limits or high demand. "
+            "Please wait 30 seconds and try again."
         )
     elif "api key" in error_str or "authentication" in error_str or "invalid_api_key" in error_str:
         return (
@@ -113,5 +140,5 @@ def handle_api_error(error):
     else:
         return (
             "An unexpected error occurred while generating a response. "
-            f"Please try again. (Error: {str(error)[:100]})"
+            "Please try again."
         )

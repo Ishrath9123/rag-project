@@ -18,6 +18,7 @@
 
 from google import genai
 from google.genai import types
+import time
 
 from config import (
     GEMINI_API_KEY,
@@ -32,8 +33,16 @@ from data_loader import get_documents, generate_ids
 from conversation import ConversationHistory
 from security import validate_input, sanitize_input
 from monitoring import check_hallucination, calculate_confidence
-from filters import filter_by_threshold, has_relevant_results, get_fallback_response, handle_api_error
+from filters import filter_by_threshold, has_relevant_results, get_fallback_response, handle_api_error, is_retryable_api_error
 from workflow import rewrite_query
+from compliance import (
+    build_metadata,
+    redact_sensitive_text,
+    safe_log,
+    tag_documents,
+    SOURCE_USER_INPUT,
+    SOURCE_MODEL_OUTPUT,
+)
 
 _client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -51,7 +60,8 @@ def initialize_vector_store():
     documents = get_documents()
     ids = generate_ids(documents)
     embeddings = embed_documents(documents)
-    add_documents(documents, embeddings, ids)
+    metadatas = tag_documents(documents)
+    add_documents(documents, embeddings, ids, metadatas)
     return len(documents)
 
 
@@ -70,8 +80,8 @@ def retrieve_context(query, n_results=TOP_K_RESULTS):
     """
     query_embedding = embed_text(query)
     results = query_similar(query_embedding, n_results)
-    documents = results["documents"][0]
-    distances = results["distances"][0]
+    documents = results["documents"][0]  # pyright: ignore[reportOptionalSubscript]
+    distances = results["distances"][0]  # pyright: ignore[reportOptionalSubscript]
     return documents, distances
 
 
@@ -118,12 +128,23 @@ Instructions:
 - Keep your answer concise and focused
 - Do not make up information that isn't in the context"""
 
-    response = _client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=TEMPERATURE),
-    )
-    return response.text
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = _client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=TEMPERATURE),
+            )
+            if not response.text:
+                raise ValueError("The AI model returned an empty response.")
+            return response.text
+        except Exception as e:
+            last_error = e
+            if attempt < 2 and is_retryable_api_error(e):
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise last_error
 
 
 # ============================================================
@@ -170,6 +191,11 @@ def run_rag(query, conversation_history=None):
             "error": error_message,
         }
     query = sanitize_input(query)
+    query_metadata = build_metadata(query, SOURCE_USER_INPUT)
+    safe_log("User query received", query)
+
+    # Redact sensitive data before any external API calls or logging
+    query_for_processing = redact_sensitive_text(query)
 
     # ── Week 15 TODO ──────────────────────────────────────────────────────────
     # Rewrite the query before retrieval to improve embedding quality.
@@ -188,10 +214,10 @@ def run_rag(query, conversation_history=None):
     history_context = ""
     if conversation_history and len(conversation_history) > 0:
         history_context = conversation_history.get_formatted_history()
-    query = rewrite_query(query, history_context)
+    query_for_processing = rewrite_query(query_for_processing, history_context)
 
     # ── Week 10: Core Retrieval — already complete ───────────────────────────
-    documents, distances = retrieve_context(query)
+    documents, distances = retrieve_context(query_for_processing)
 
     # ── Week 14 TODO ──────────────────────────────────────────────────────────
     # Filter out documents that aren't similar enough to be useful.
@@ -222,7 +248,7 @@ def run_rag(query, conversation_history=None):
     # ── Week 10: Core Generation — already complete ──────────────────────────
     # Week 14: wrap this in try/except and call handle_api_error(e) on failure
     try:
-        answer = generate_answer(query, documents, conversation_history)
+        answer = generate_answer(query_for_processing, documents, conversation_history)
     except Exception as e:
         error_msg = handle_api_error(e)
         return {
@@ -261,9 +287,16 @@ def run_rag(query, conversation_history=None):
     #   conversation_history.add_message("user", query)
     #   conversation_history.add_message("assistant", answer)
     # ─────────────────────────────────────────────────────────────────────────
+    answer_metadata = build_metadata(answer, SOURCE_MODEL_OUTPUT)
+    safe_log("Model response generated", answer)  # pyright: ignore[reportArgumentType]
+
     if conversation_history is not None:
-        conversation_history.add_message("user", query)
-        conversation_history.add_message("assistant", answer)
+        conversation_history.add_message(
+            "user", query_for_processing, metadata=query_metadata
+        )
+        conversation_history.add_message(
+            "assistant", redact_sensitive_text(answer), metadata=answer_metadata
+        )
 
     return {
         "answer": answer,
@@ -272,6 +305,8 @@ def run_rag(query, conversation_history=None):
         "confidence": confidence,
         "grounding": grounding,
         "error": "",
+        "query_metadata": query_metadata,
+        "answer_metadata": answer_metadata,
     }
 
 
@@ -306,10 +341,17 @@ def get_feature_status():
     # Week 15: hard to auto-detect without an API call — check manually
     week15 = None  # None = "check manually"
 
+    from compliance import tag_documents, redact_sensitive_text
+    week18 = (
+        len(tag_documents(["test"])) == 1
+        and redact_sensitive_text("email@test.com") != "email@test.com"
+    )
+
     return {
         "Week 11 — Conversation context": week11,
         "Week 12 — Input security": week12,
         "Week 13 — Hallucination monitoring": week13,
         "Week 14 — Filtering & fallbacks": week14,
         "Week 15 — Query rewriting": week15,
+        "Week 18 — Compliance (tagging & redaction)": week18,
     }

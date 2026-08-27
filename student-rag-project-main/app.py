@@ -12,9 +12,13 @@
 # If we want to improve the search algorithm, we edit the logic files.
 # This is called "separation of concerns" — each file has one job.
 
+import logging
 import streamlit as st
 from rag_pipeline import initialize_vector_store, run_rag, get_feature_status
 from conversation import ConversationHistory
+from compliance import redact_sensitive_text
+
+logging.basicConfig(level=logging.INFO)
 
 # --- Page Configuration ---
 # This must be the FIRST Streamlit command called in the script.
@@ -152,7 +156,7 @@ if query:
 
         # Display error or answer
         if result["error"]:
-            st.error(result["answer"])
+            st.error(redact_sensitive_text(result["answer"]))
         else:
             st.write(result["answer"])
 

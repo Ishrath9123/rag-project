@@ -15,6 +15,9 @@ User Query
 [security.py]      ← Validate and sanitize input (Week 12)
     │
     ▼
+[compliance.py]    ← Tag metadata & redact sensitive data (Week 18)
+    │
+    ▼
 [workflow.py]      ← Rewrite query for better retrieval (Week 15)
     │
     ▼
@@ -95,6 +98,53 @@ The app opens in your browser at `http://localhost:8501`.
 | `monitoring.py` | Hallucination detection (Week 13) |
 | `filters.py` | Similarity filtering and fallbacks (Week 14) |
 | `workflow.py` | Query rewriting and multi-hop retrieval (Week 15) |
+| `compliance.py` | Metadata tagging and sensitive data redaction (Week 18) |
+
+---
+
+## Compliance & Data Protection (Week 18)
+
+This app is a learning project, but we treat it as if it could handle real user data in production.
+
+### Applicable trust principles
+
+| Principle | Why it applies |
+|-----------|----------------|
+| **Security** | User queries are sent to an external LLM API (Gemini). We validate input at the boundary (`security.py`) and redact sensitive data before it leaves the app. |
+| **Confidentiality** | Users might paste emails, phone numbers, or other PII into the chat. We tag and redact this data so it is not logged or stored in plain text. |
+| **Privacy** | Conversation history is kept in session memory only. Sensitive fields are redacted before being saved to history or sent to the model. |
+
+### Where sensitive data can appear
+
+| Location | Examples | Handling |
+|----------|----------|----------|
+| **User input** | Names, emails, phone numbers, SSNs | Tagged as `user_input`, redacted before API calls and logging |
+| **Stored documents** | Could include internal or proprietary text in a real deployment | Tagged as `document` with `public` sensitivity for our sample docs |
+| **Model output** | May repeat or summarize sensitive input | Tagged as `model_output`, redacted before logging |
+| **Logs / errors** | Could accidentally capture query text | `safe_log()` redacts before writing; error messages omit raw exception details |
+
+### Metadata tags
+
+Each piece of data gets three tags (defined in `compliance.py`):
+
+- **sensitivity:** `public` / `internal` / `confidential` / `restricted`
+- **data_type:** `PII` / `PHI` / `financial` / `operational`
+- **source:** `user_input` / `document` / `model_output`
+
+Tags are attached when documents are loaded into ChromaDB and when user queries and model responses are processed.
+
+### Where redaction happens
+
+1. **Before external API calls** — user queries are redacted before being sent to Gemini (rewrite + generate steps)
+2. **Before logging** — `safe_log()` redacts emails, phones, SSNs, and credit card patterns
+3. **Before saving conversation history** — redacted text is stored, not the raw sensitive input
+4. **Before displaying errors** — error messages do not include raw exception text that might contain user data
+
+### Limitations
+
+- Pattern-based detection only (regex) — it will not catch all forms of sensitive data
+- Redaction is for learning/demo purposes, not SOC 2 certification
+- Session history is in-memory only and clears when the app restarts
 
 ---
 
@@ -107,6 +157,7 @@ The app opens in your browser at `http://localhost:8501`.
 - [x] Week 14 — Implemented filtering and fallbacks
 - [x] Week 15 — Implemented multi-step AI workflows
 - [x] Week 16 — Architecture diagram
+- [x] Week 18 — Compliance (metadata tagging and redaction)
 
 ---
 
