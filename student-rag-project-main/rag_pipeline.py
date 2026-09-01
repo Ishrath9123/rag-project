@@ -338,8 +338,10 @@ def get_feature_status():
     _filtered, _ = filter_by_threshold(["a", "b"], [0.3, 1.5], threshold=1.0)
     week14 = len(_filtered) == 1
 
-    # Week 15: hard to auto-detect without an API call — check manually
-    week15 = None  # None = "check manually"
+    # Week 15: rewrite_query() is implemented if it actually calls Gemini
+    import inspect
+    from workflow import rewrite_query
+    week15 = "_client.models.generate_content" in inspect.getsource(rewrite_query)
 
     from compliance import tag_documents, redact_sensitive_text
     week18 = (

@@ -81,6 +81,13 @@ streamlit run app.py
 
 The app opens in your browser at `http://localhost:8501`.
 
+### 6. Run tests
+```bash
+pytest
+```
+
+Run this from the `student-rag-project-main` folder. GitHub Actions also runs these tests on every push and pull request.
+
 ---
 
 ## File Descriptions
@@ -99,6 +106,8 @@ The app opens in your browser at `http://localhost:8501`.
 | `filters.py` | Similarity filtering and fallbacks (Week 14) |
 | `workflow.py` | Query rewriting and multi-hop retrieval (Week 15) |
 | `compliance.py` | Metadata tagging and sensitive data redaction (Week 18) |
+| `tests/test_basic.py` | Unit tests for redaction, tagging, and input safety (Week 19) |
+| `.github/workflows/tests.yml` | GitHub Actions CI — runs pytest on push and pull request |
 
 ---
 
@@ -148,6 +157,31 @@ Tags are attached when documents are loaded into ChromaDB and when user queries 
 
 ---
 
+## Testing (Week 19)
+
+This project uses `pytest` for automated unit tests. The tests live in `tests/test_basic.py` and run both locally and in GitHub Actions.
+
+### What we tested
+
+- **Text redaction** — emails, phone numbers, SSNs, and credit card numbers are replaced with `[REDACTED]`
+- **Metadata tagging** — documents and user input get the correct sensitivity, data type, and source tags
+- **Input helpers** — `sanitize_input()` strips extra whitespace
+- **Safety behavior** — prompt injection is blocked, and personal data is not returned in raw form
+
+### Why these tests matter
+
+Redaction and input validation are safety-critical. If they break, the app could log or send personal data, or let a prompt-injection attack through. These tests fail if that protection is removed.
+
+### What is intentionally not tested
+
+- Gemini API calls (query rewriting, answer generation, hallucination checks)
+- ChromaDB / embedding search
+- The Streamlit UI
+
+Those steps need live APIs or a running app, so they are not part of this unit-test suite.
+
+---
+
 ## Weekly Progress
 
 - [x] Week 10 — Ran the starter app and explored the codebase
@@ -158,6 +192,7 @@ Tags are attached when documents are loaded into ChromaDB and when user queries 
 - [x] Week 15 — Implemented multi-step AI workflows
 - [x] Week 16 — Architecture diagram
 - [x] Week 18 — Compliance (metadata tagging and redaction)
+- [x] Week 19 — Testing and CI/CD foundations
 
 ---
 
